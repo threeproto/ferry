@@ -55,9 +55,10 @@ impl MdnsTransport {
         // Start mDNS daemon
         let mdns = ServiceDaemon::new().map_err(|e| e.to_string())?;
 
-        // Register our service
+        // Register our service with the actual local IP so cross-platform discovery works
         let local_ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
-        let hostname = format!("{}.local.", user_name);
+        // Use hostname distinct from the OS hostname to avoid conflicts with system mDNSResponder
+        let hostname = format!("ferry-{}.local.", user_name);
         let service_info = ServiceInfo::new(
             SERVICE_TYPE,
             user_name,
@@ -77,10 +78,14 @@ impl MdnsTransport {
             while let Ok(event) = receiver.recv() {
                 match event {
                     ServiceEvent::ServiceResolved(info) => {
-                        let instance = info.get_fullname();
-                        let name = instance
+                        // fullname = "username._ferry._tcp.local."
+                        let fullname = info.get_fullname();
+                        let name = fullname
                             .strip_suffix(&format!(".{}", SERVICE_TYPE))
-                            .unwrap_or(instance)
+                            .unwrap_or_else(|| {
+                                // fallback: take the part before the first '.'
+                                fullname.split('.').next().unwrap_or(fullname)
+                            })
                             .to_string();
                         if name != my_name {
                             if let Some(addr) = info.get_addresses().iter().next() {
@@ -92,8 +97,9 @@ impl MdnsTransport {
                     ServiceEvent::ServiceRemoved(_, fullname) => {
                         let name = fullname
                             .strip_suffix(&format!(".{}", SERVICE_TYPE))
-                            .unwrap_or(&fullname)
+                            .unwrap_or_else(|| fullname.split('.').next().unwrap_or(&fullname))
                             .to_string();
+                        // Only remove if it was an mDNS peer (don't remove manually-added peers)
                         peers_bg.lock().unwrap().remove(&name);
                     }
                     _ => {}
@@ -110,23 +116,27 @@ impl MdnsTransport {
         })
     }
 
-    pub fn send(&self, to_user: &str, data: Vec<u8>) -> Result<(), String> {
+    /// Manually register a peer's address (fallback when mDNS doesn't work cross-platform).
+    pub fn add_peer(&self, name: &str, addr: SocketAddr) {
+        self.peers.lock().unwrap().insert(name.to_string(), addr);
+    }
+
+    /// Try to send. Returns Ok(true) if sent, Ok(false) if peer not discovered yet.
+    pub fn try_send(&self, to_user: &str, data: Vec<u8>) -> Result<bool, String> {
         let addr = self.peers.lock().unwrap().get(to_user).copied();
         match addr {
             Some(addr) => {
                 let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5))
-                    .map_err(|e| format!("connect to {}: {}", to_user, e))?;
+                    .map_err(|e| format!("TCP connect to {} ({}): {}", to_user, addr, e))?;
                 let envelope = MessageEnvelope {
                     from: self.user_name.clone(),
                     data,
                     timestamp: now_ms(),
                 };
-                write_envelope(&mut stream, &envelope).map_err(|e| e.to_string())
+                write_envelope(&mut stream, &envelope).map_err(|e| e.to_string())?;
+                Ok(true)
             }
-            None => Err(format!(
-                "Peer '{}' not found — wait for mDNS discovery or check network",
-                to_user
-            )),
+            None => Ok(false),
         }
     }
 
@@ -136,6 +146,15 @@ impl MdnsTransport {
 
     pub fn list_peers(&self) -> Vec<String> {
         self.peers.lock().unwrap().keys().cloned().collect()
+    }
+
+    pub fn list_peers_with_addrs(&self) -> Vec<(String, String)> {
+        self.peers
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(name, addr)| (name.clone(), addr.to_string()))
+            .collect()
     }
 }
 
@@ -153,7 +172,7 @@ fn read_envelope(mut stream: TcpStream) -> std::io::Result<MessageEnvelope> {
     let len = u32::from_be_bytes(len_buf) as usize;
     let mut buf = vec![0u8; len];
     stream.read_exact(&mut buf)?;
-    serde_json::from_slice(&buf).map_err(|e| std::io::Error::other(e))
+    serde_json::from_slice(&buf).map_err(std::io::Error::other)
 }
 
 fn get_local_ip() -> Option<String> {

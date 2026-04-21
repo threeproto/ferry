@@ -1,11 +1,12 @@
 //! FRB-exposed chat API using libchat + mDNS transport.
 
 use std::cell::RefCell;
+use std::net::SocketAddr;
 
 use flutter_rust_bridge::frb;
 use libchat::{ChatStorage, Context as ChatManager, Introduction, StorageConfig};
 
-use crate::chat_state::{ChatState, PersistedState, Session, StoredMessage};
+use crate::chat_state::{ChatState, PendingEnvelope, PersistedState, Session, StoredMessage};
 use crate::transport::{MdnsTransport, now_ms};
 
 // ── Public types (FRB-visible) ────────────────────────────────────────────────
@@ -21,6 +22,8 @@ pub struct ChatInfo {
     pub chat_id: String,
     pub message_count: i32,
     pub is_active: bool,
+    /// True if there are unsent handshake/message envelopes for this peer.
+    pub has_pending: bool,
 }
 
 pub struct ChatStatusInfo {
@@ -29,6 +32,13 @@ pub struct ChatStatusInfo {
     pub chat_count: i32,
     pub active_chat: String,
     pub tcp_port: u16,
+    pub local_ip: String,
+    pub pending_count: i32,
+}
+
+pub struct PeerInfo {
+    pub name: String,
+    pub addr: String,
 }
 
 // ── Thread-local state ────────────────────────────────────────────────────────
@@ -77,6 +87,7 @@ pub fn chat_init(user_name: String, data_dir: String) -> Result<(), String> {
             transport,
             state,
             state_path,
+            pending: Vec::new(),
         });
         Ok(())
     })
@@ -100,7 +111,8 @@ pub fn chat_get_intro() -> Result<String, String> {
     })
 }
 
-/// Add a friend by providing their intro bundle; initiates the conversation.
+/// Add a friend by providing their intro bundle.
+/// If the peer isn't reachable yet, the handshake is queued and retried automatically.
 #[frb(sync)]
 pub fn chat_add_friend(remote_user: String, bundle: String) -> Result<(), String> {
     with_chat(|s| {
@@ -115,8 +127,26 @@ pub fn chat_add_friend(remote_user: String, bundle: String) -> Result<(), String
             .create_private_convo(&intro, "👋 Hello!".as_bytes())
             .map_err(|e| format!("{:?}", e))?;
 
+        // Try to send each envelope; queue the ones that can't be delivered yet.
         for env in envelopes {
-            s.transport.send(&remote_user, env.data)?;
+            match s.transport.try_send(&remote_user, env.data.clone()) {
+                Ok(true) => {}
+                Ok(false) => {
+                    // Peer not yet discovered — queue for retry
+                    s.pending.push(PendingEnvelope {
+                        to: remote_user.clone(),
+                        data: env.data,
+                    });
+                }
+                Err(e) => {
+                    // Connection failed (peer found but unreachable) — queue for retry
+                    s.pending.push(PendingEnvelope {
+                        to: remote_user.clone(),
+                        data: env.data,
+                    });
+                    let _ = e; // logged implicitly via has_pending in UI
+                }
+            }
         }
 
         let session = Session {
@@ -135,6 +165,19 @@ pub fn chat_add_friend(remote_user: String, bundle: String) -> Result<(), String
     })
 }
 
+/// Manually register a peer's address when mDNS discovery doesn't work.
+/// `addr` should be "ip:port", e.g. "192.168.1.101:54321".
+#[frb(sync)]
+pub fn chat_add_peer_addr(name: String, addr: String) -> Result<(), String> {
+    with_chat(|s| {
+        let sa: SocketAddr = addr
+            .parse()
+            .map_err(|e| format!("Invalid address '{}': {}", addr, e))?;
+        s.transport.add_peer(&name, sa);
+        Ok(())
+    })
+}
+
 /// List all chat sessions.
 #[frb(sync)]
 pub fn chat_list_chats() -> Vec<ChatInfo> {
@@ -146,11 +189,15 @@ pub fn chat_list_chats() -> Vec<ChatInfo> {
         s.state
             .chats
             .values()
-            .map(|sess| ChatInfo {
-                remote_user: sess.remote_user.clone(),
-                chat_id: sess.chat_id.clone(),
-                message_count: sess.messages.len() as i32,
-                is_active: s.state.active_chat.as_deref() == Some(&sess.remote_user),
+            .map(|sess| {
+                let has_pending = s.pending.iter().any(|p| p.to == sess.remote_user);
+                ChatInfo {
+                    remote_user: sess.remote_user.clone(),
+                    chat_id: sess.chat_id.clone(),
+                    message_count: sess.messages.len() as i32,
+                    is_active: s.state.active_chat.as_deref() == Some(&sess.remote_user),
+                    has_pending,
+                }
             })
             .collect()
     })
@@ -176,6 +223,7 @@ pub fn chat_delete(remote_user: String) -> Result<(), String> {
         if s.state.chats.remove(&remote_user).is_none() {
             return Err(format!("No chat with '{}'", remote_user));
         }
+        s.pending.retain(|p| p.to != remote_user);
         if s.state.active_chat.as_deref() == Some(&remote_user) {
             s.state.active_chat = s.state.chats.keys().next().cloned();
         }
@@ -207,14 +255,28 @@ pub fn chat_send(content: String) -> Result<(), String> {
             .send_content(&chat_id, content.as_bytes())
             .map_err(|e| format!("{:?}", e))?;
 
+        let mut any_queued = false;
         for env in envelopes {
-            s.transport.send(&remote_user, env.data)?;
+            match s.transport.try_send(&remote_user, env.data.clone()) {
+                Ok(true) => {}
+                _ => {
+                    s.pending.push(PendingEnvelope {
+                        to: remote_user.clone(),
+                        data: env.data,
+                    });
+                    any_queued = true;
+                }
+            }
         }
 
         if let Some(sess) = s.state.chats.get_mut(&active) {
             sess.messages.push(StoredMessage {
                 from_self: true,
-                content,
+                content: if any_queued {
+                    format!("{} (pending…)", content)
+                } else {
+                    content
+                },
                 timestamp: now_ms(),
             });
         }
@@ -223,10 +285,20 @@ pub fn chat_send(content: String) -> Result<(), String> {
     })
 }
 
-/// Poll for incoming envelopes. Returns names of users who sent new messages.
+/// Poll: process incoming messages AND retry any pending sends.
+/// Returns names of users who sent new messages.
 #[frb(sync)]
 pub fn chat_poll() -> Result<Vec<String>, String> {
     with_chat(|s| {
+        // Retry pending sends
+        s.pending.retain_mut(|p| {
+            match s.transport.try_send(&p.to, p.data.clone()) {
+                Ok(true) => false, // delivered — remove
+                _ => true,          // still pending — keep
+            }
+        });
+
+        // Process incoming envelopes
         let mut senders = Vec::new();
         while let Some(env) = s.transport.try_recv() {
             match s.manager.handle_payload(&env.data) {
@@ -301,7 +373,7 @@ pub fn chat_get_active() -> String {
     })
 }
 
-/// Status info for display.
+/// Status info including local IP and TCP port for manual peer setup.
 #[frb(sync)]
 pub fn chat_get_status() -> ChatStatusInfo {
     CHAT.with(|cell| {
@@ -313,6 +385,8 @@ pub fn chat_get_status() -> ChatStatusInfo {
                 chat_count: 0,
                 active_chat: String::new(),
                 tcp_port: 0,
+                local_ip: String::new(),
+                pending_count: 0,
             };
         };
         ChatStatusInfo {
@@ -321,11 +395,13 @@ pub fn chat_get_status() -> ChatStatusInfo {
             chat_count: s.state.chats.len() as i32,
             active_chat: s.state.active_chat.clone().unwrap_or_default(),
             tcp_port: s.transport.tcp_port,
+            local_ip: get_local_ip_str(),
+            pending_count: s.pending.len() as i32,
         }
     })
 }
 
-/// Peers currently visible via mDNS.
+/// Peers currently visible via mDNS, with their addresses.
 #[frb(sync)]
 pub fn chat_list_peers() -> Vec<String> {
     CHAT.with(|cell| {
@@ -336,6 +412,38 @@ pub fn chat_list_peers() -> Vec<String> {
     })
 }
 
+/// Peers with their IP:port addresses (useful for manual cross-reference).
+#[frb(sync)]
+pub fn chat_list_peers_with_addrs() -> Vec<PeerInfo> {
+    CHAT.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .map(|s| {
+                s.transport
+                    .list_peers_with_addrs()
+                    .into_iter()
+                    .map(|(name, addr)| PeerInfo { name, addr })
+                    .collect()
+            })
+            .unwrap_or_default()
+    })
+}
+
 fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+fn get_local_ip_str() -> String {
+    use std::net::UdpSocket;
+    let socket = match UdpSocket::bind("0.0.0.0:0") {
+        Ok(s) => s,
+        Err(_) => return String::new(),
+    };
+    if socket.connect("8.8.8.8:80").is_err() {
+        return String::new();
+    }
+    socket
+        .local_addr()
+        .map(|a| a.ip().to_string())
+        .unwrap_or_default()
 }

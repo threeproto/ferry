@@ -21,6 +21,12 @@ pub struct StoredMessage {
     pub timestamp: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingEnvelope {
+    pub to: String,
+    pub data: Vec<u8>,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct PersistedState {
     pub chats: HashMap<String, Session>,
@@ -32,6 +38,8 @@ pub struct ChatState {
     pub transport: MdnsTransport,
     pub state: PersistedState,
     pub state_path: String,
+    /// Envelopes that couldn't be delivered yet (peer not found); retried on each poll.
+    pub pending: Vec<PendingEnvelope>,
 }
 
 impl ChatState {

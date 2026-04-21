@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `hex_encode`, `with_chat`
+// These functions are ignored because they are not marked as `pub`: `get_local_ip_str`, `hex_encode`, `with_chat`
 
 /// Initialize the chat engine. Safe to call multiple times (no-op after first).
 void chatInit({required String userName, required String dataDir}) => RustLib
@@ -21,12 +21,18 @@ bool chatIsInitialized() =>
 /// Create and return an intro bundle string for sharing out-of-band.
 String chatGetIntro() => RustLib.instance.api.crateApiChatChatGetIntro();
 
-/// Add a friend by providing their intro bundle; initiates the conversation.
+/// Add a friend by providing their intro bundle.
+/// If the peer isn't reachable yet, the handshake is queued and retried automatically.
 void chatAddFriend({required String remoteUser, required String bundle}) =>
     RustLib.instance.api.crateApiChatChatAddFriend(
       remoteUser: remoteUser,
       bundle: bundle,
     );
+
+/// Manually register a peer's address when mDNS discovery doesn't work.
+/// `addr` should be "ip:port", e.g. "192.168.1.101:54321".
+void chatAddPeerAddr({required String name, required String addr}) =>
+    RustLib.instance.api.crateApiChatChatAddPeerAddr(name: name, addr: addr);
 
 /// List all chat sessions.
 List<ChatInfo> chatListChats() =>
@@ -44,7 +50,8 @@ void chatDelete({required String remoteUser}) =>
 void chatSend({required String content}) =>
     RustLib.instance.api.crateApiChatChatSend(content: content);
 
-/// Poll for incoming envelopes. Returns names of users who sent new messages.
+/// Poll: process incoming messages AND retry any pending sends.
+/// Returns names of users who sent new messages.
 List<String> chatPoll() => RustLib.instance.api.crateApiChatChatPoll();
 
 /// Get all messages for the active chat.
@@ -54,13 +61,17 @@ List<ChatMessage> chatGetMessages() =>
 /// Returns the active chat's remote_user name, or empty string if none.
 String chatGetActive() => RustLib.instance.api.crateApiChatChatGetActive();
 
-/// Status info for display.
+/// Status info including local IP and TCP port for manual peer setup.
 ChatStatusInfo chatGetStatus() =>
     RustLib.instance.api.crateApiChatChatGetStatus();
 
-/// Peers currently visible via mDNS.
+/// Peers currently visible via mDNS, with their addresses.
 List<String> chatListPeers() =>
     RustLib.instance.api.crateApiChatChatListPeers();
+
+/// Peers with their IP:port addresses (useful for manual cross-reference).
+List<PeerInfo> chatListPeersWithAddrs() =>
+    RustLib.instance.api.crateApiChatChatListPeersWithAddrs();
 
 class ChatInfo {
   final String remoteUser;
@@ -68,11 +79,15 @@ class ChatInfo {
   final int messageCount;
   final bool isActive;
 
+  /// True if there are unsent handshake/message envelopes for this peer.
+  final bool hasPending;
+
   const ChatInfo({
     required this.remoteUser,
     required this.chatId,
     required this.messageCount,
     required this.isActive,
+    required this.hasPending,
   });
 
   @override
@@ -80,7 +95,8 @@ class ChatInfo {
       remoteUser.hashCode ^
       chatId.hashCode ^
       messageCount.hashCode ^
-      isActive.hashCode;
+      isActive.hashCode ^
+      hasPending.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -90,7 +106,8 @@ class ChatInfo {
           remoteUser == other.remoteUser &&
           chatId == other.chatId &&
           messageCount == other.messageCount &&
-          isActive == other.isActive;
+          isActive == other.isActive &&
+          hasPending == other.hasPending;
 }
 
 class ChatMessage {
@@ -123,6 +140,8 @@ class ChatStatusInfo {
   final int chatCount;
   final String activeChat;
   final int tcpPort;
+  final String localIp;
+  final int pendingCount;
 
   const ChatStatusInfo({
     required this.userName,
@@ -130,6 +149,8 @@ class ChatStatusInfo {
     required this.chatCount,
     required this.activeChat,
     required this.tcpPort,
+    required this.localIp,
+    required this.pendingCount,
   });
 
   @override
@@ -138,7 +159,9 @@ class ChatStatusInfo {
       addressHex.hashCode ^
       chatCount.hashCode ^
       activeChat.hashCode ^
-      tcpPort.hashCode;
+      tcpPort.hashCode ^
+      localIp.hashCode ^
+      pendingCount.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -149,5 +172,25 @@ class ChatStatusInfo {
           addressHex == other.addressHex &&
           chatCount == other.chatCount &&
           activeChat == other.activeChat &&
-          tcpPort == other.tcpPort;
+          tcpPort == other.tcpPort &&
+          localIp == other.localIp &&
+          pendingCount == other.pendingCount;
+}
+
+class PeerInfo {
+  final String name;
+  final String addr;
+
+  const PeerInfo({required this.name, required this.addr});
+
+  @override
+  int get hashCode => name.hashCode ^ addr.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PeerInfo &&
+          runtimeType == other.runtimeType &&
+          name == other.name &&
+          addr == other.addr;
 }
