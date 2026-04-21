@@ -429,6 +429,15 @@ pub fn chat_list_peers_with_addrs() -> Vec<PeerInfo> {
     })
 }
 
+/// Drop all in-memory state so a fresh `chat_init` can be called.
+/// The caller is responsible for deleting the data files on disk.
+#[frb(sync)]
+pub fn chat_clear() {
+    CHAT.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
+}
+
 fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }

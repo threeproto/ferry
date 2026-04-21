@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -6,14 +7,61 @@ import 'package:path_provider/path_provider.dart';
 import 'src/rust/api/chat.dart';
 import 'src/rust/frb_generated.dart';
 
+Future<String> _getDataDir() async {
+  final dir = await getApplicationDocumentsDirectory();
+  return '${dir.path}/ferry_chat';
+}
+
+/// Returns the saved username, or null if not set.
+Future<String?> _loadSavedUsername() async {
+  final dataDir = await _getDataDir();
+  final file = File('$dataDir/username.txt');
+  if (await file.exists()) {
+    final name = (await file.readAsString()).trim();
+    return name.isEmpty ? null : name;
+  }
+  return null;
+}
+
+Future<void> _saveUsername(String name) async {
+  final dataDir = await _getDataDir();
+  await Directory(dataDir).create(recursive: true);
+  await File('$dataDir/username.txt').writeAsString(name);
+}
+
+Future<void> _deleteAllData() async {
+  final dataDir = await _getDataDir();
+  final dir = Directory(dataDir);
+  if (await dir.exists()) {
+    await dir.delete(recursive: true);
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await RustLib.init();
-  runApp(const FerryApp());
+
+  // Auto-initialize if a username was saved from a previous session.
+  final savedName = await _loadSavedUsername();
+  Widget home;
+  if (savedName != null) {
+    try {
+      final dataDir = await _getDataDir();
+      chatInit(userName: savedName, dataDir: dataDir);
+      home = const ChatListScreen();
+    } catch (_) {
+      home = const SetupScreen();
+    }
+  } else {
+    home = const SetupScreen();
+  }
+
+  runApp(FerryApp(home: home));
 }
 
 class FerryApp extends StatelessWidget {
-  const FerryApp({super.key});
+  final Widget home;
+  const FerryApp({super.key, required this.home});
 
   @override
   Widget build(BuildContext context) {
@@ -23,7 +71,7 @@ class FerryApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF4A90D9)),
         useMaterial3: true,
       ),
-      home: const SetupScreen(),
+      home: home,
     );
   }
 }
@@ -59,9 +107,9 @@ class _SetupScreenState extends State<SetupScreen> {
       _error = '';
     });
     try {
-      final dir = await getApplicationDocumentsDirectory();
-      final dataDir = '${dir.path}/ferry_chat';
+      final dataDir = await _getDataDir();
       chatInit(userName: name, dataDir: dataDir);
+      await _saveUsername(name);
       if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const ChatListScreen()),
@@ -85,9 +133,11 @@ class _SetupScreenState extends State<SetupScreen> {
             children: [
               const Icon(Icons.chat_rounded, size: 72, color: Color(0xFF4A90D9)),
               const SizedBox(height: 16),
-              const Text('Ferry', style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
+              const Text('Ferry',
+                  style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              const Text('Encrypted peer-to-peer chat', style: TextStyle(color: Colors.grey)),
+              const Text('Encrypted peer-to-peer chat',
+                  style: TextStyle(color: Colors.grey)),
               const SizedBox(height: 40),
               TextField(
                 controller: _nameCtrl,
@@ -162,17 +212,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   void _poll() {
     try {
-      final newSenders = chatPoll();
-      if (newSenders.isNotEmpty || (_status?.pendingCount ?? 0) > 0) {
-        _refresh();
-      } else {
-        // Still refresh peers and pending counts periodically
-        setState(() {
-          _peers = chatListPeers();
-          _status = chatGetStatus();
-          _chats = chatListChats();
-        });
-      }
+      chatPoll();
+      setState(() {
+        _chats = chatListChats();
+        _peers = chatListPeers();
+        _status = chatGetStatus();
+      });
     } catch (_) {}
   }
 
@@ -195,7 +240,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Show IP:port prominently so friend can use manual entry
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
@@ -305,7 +349,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   maxLines: 3,
                 ),
                 const SizedBox(height: 8),
-                // Manual IP fallback toggle
                 GestureDetector(
                   onTap: () => setS(() => showAddrField = !showAddrField),
                   child: Row(
@@ -340,14 +383,16 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 if (errorMsg.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Text(errorMsg,
-                      style: const TextStyle(color: Colors.red, fontSize: 13)),
+                      style:
+                          const TextStyle(color: Colors.red, fontSize: 13)),
                 ],
               ],
             ),
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel')),
             FilledButton(
               onPressed: () {
                 final name = nameCtrl.text.trim();
@@ -357,7 +402,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   return;
                 }
                 try {
-                  // Register manual address first if provided
                   final addr = addrCtrl.text.trim();
                   if (addr.isNotEmpty) {
                     chatAddPeerAddr(name: name, addr: addr);
@@ -402,8 +446,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
             _statusRow('TCP port', s.tcpPort.toString()),
             _statusRow('Chats', s.chatCount.toString()),
             if (s.pendingCount > 0)
-              _statusRow('Pending', '${s.pendingCount} unsent', color: Colors.orange),
-            _statusRow('Active', s.activeChat.isEmpty ? '—' : s.activeChat),
+              _statusRow('Pending', '${s.pendingCount} unsent',
+                  color: Colors.orange),
+            _statusRow(
+                'Active', s.activeChat.isEmpty ? '—' : s.activeChat),
             if (peers.isNotEmpty) ...[
               const Divider(),
               const Text('Discovered peers:',
@@ -420,16 +466,63 @@ class _ChatListScreenState extends State<ChatListScreen> {
             const SizedBox(height: 4),
             SelectableText(
               s.addressHex,
-              style: const TextStyle(fontSize: 10, fontFamily: 'monospace'),
+              style:
+                  const TextStyle(fontSize: 10, fontFamily: 'monospace'),
             ),
           ],
         ),
         actions: [
+          // Reset button
+          TextButton.icon(
+            icon: const Icon(Icons.delete_forever, color: Colors.red, size: 18),
+            label: const Text('Reset', style: TextStyle(color: Colors.red)),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _confirmReset();
+            },
+          ),
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close')),
         ],
       ),
     );
+  }
+
+  Future<void> _confirmReset() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reset all data?'),
+        content: const Text(
+          'This will delete your identity, all chats, and messages. '
+          'You will start fresh with a new identity.\n\nThis cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete everything'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      // Drop in-memory state
+      chatClear();
+      // Delete all files
+      await _deleteAllData();
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const SetupScreen()),
+          (route) => false,
+        );
+      }
+    }
   }
 
   Widget _statusRow(String label, String value, {Color? color}) => Padding(
@@ -486,7 +579,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
       ),
       body: Column(
         children: [
-          // Discovered peers banner
           if (_peers.isNotEmpty)
             Container(
               width: double.infinity,
@@ -673,7 +765,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _loadMessages() {
     final chats = chatListChats();
-    final info = chats.where((c) => c.remoteUser == widget.remoteUser).firstOrNull;
+    final info =
+        chats.where((c) => c.remoteUser == widget.remoteUser).firstOrNull;
     setState(() {
       _messages = chatGetMessages();
       _hasPending = info?.hasPending ?? false;
@@ -693,7 +786,6 @@ class _ChatScreenState extends State<ChatScreen> {
         _hasPending = info?.hasPending ?? false;
       });
       if (wasPending && !_hasPending) {
-        // Pending cleared — scroll to show delivery confirmed
         WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
       }
     } catch (_) {}
@@ -743,13 +835,14 @@ class _ChatScreenState extends State<ChatScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'mDNS discovery failed. Ask ${widget.remoteUser} for their IP:port from the "Show intro" screen.',
+                'Ask ${widget.remoteUser} for their IP:port from the "Show intro" screen.',
                 style: const TextStyle(fontSize: 13, color: Colors.grey),
               ),
               const SizedBox(height: 4),
               Text(
                 'Your address: ${status.localIp}:${status.tcpPort}',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -765,7 +858,8 @@ class _ChatScreenState extends State<ChatScreen> {
               if (errorMsg.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Text(errorMsg,
-                    style: const TextStyle(color: Colors.red, fontSize: 13)),
+                    style:
+                        const TextStyle(color: Colors.red, fontSize: 13)),
               ],
             ],
           ),
@@ -845,7 +939,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   const SizedBox(width: 8),
                   const Expanded(
                     child: Text(
-                      'Waiting to reach peer — mDNS discovery in progress or enter address manually.',
+                      'Waiting to reach peer — mDNS in progress or enter address manually.',
                       style: TextStyle(fontSize: 12, color: Colors.orange),
                     ),
                   ),
@@ -902,9 +996,7 @@ class _ChatScreenState extends State<ChatScreen> {
             maxWidth: MediaQuery.of(context).size.width * 0.75),
         decoration: BoxDecoration(
           color: isMe
-              ? (isPending
-                  ? Colors.orange[200]
-                  : const Color(0xFF4A90D9))
+              ? (isPending ? Colors.orange[200] : const Color(0xFF4A90D9))
               : Colors.grey[200],
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(18),

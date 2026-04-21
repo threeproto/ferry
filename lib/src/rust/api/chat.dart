@@ -73,6 +73,10 @@ List<String> chatListPeers() =>
 List<PeerInfo> chatListPeersWithAddrs() =>
     RustLib.instance.api.crateApiChatChatListPeersWithAddrs();
 
+/// Drop all in-memory state so a fresh `chat_init` can be called.
+/// The caller is responsible for deleting the data files on disk.
+void chatClear() => RustLib.instance.api.crateApiChatChatClear();
+
 class ChatInfo {
   final String remoteUser;
   final String chatId;

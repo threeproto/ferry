@@ -7,7 +7,7 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() async => await RustLib.init());
   testWidgets('App launches to setup screen', (WidgetTester tester) async {
-    await tester.pumpWidget(const FerryApp());
+    await tester.pumpWidget(const FerryApp(home: SetupScreen()));
     expect(find.text('Ferry'), findsOneWidget);
   });
 }
