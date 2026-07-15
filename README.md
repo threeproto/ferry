@@ -1,7 +1,43 @@
-# Tauri + React + Typescript
+# Ferry
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+End-to-end encrypted group chat desktop app (Tauri + React), built on
+[libchat](../libchat)'s opinionated Logos stack: `logos_chat::open` gives a
+delegate identity, the HTTP keypackage + account registry, encrypted SQLite
+storage, and an embedded logos-delivery (Waku) node as the transport. Groups
+are GroupV2 conversations (de-mls): invites and member adds are staged as
+proposals and committed asynchronously, so they can take around a minute to
+land on the other side.
 
-## Recommended IDE Setup
+## Build and run
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+The `logos-delivery` crate links the native `liblogosdelivery`. Its build
+script finds it via `LOGOS_DELIVERY_LIB_DIR`, or falls back to
+`nix build .#logos-delivery` in the libchat repo.
+
+```sh
+pnpm install
+pnpm tauri dev
+```
+
+## Trying group chat locally
+
+Each profile keeps its own database and account. Run two instances with
+different profiles:
+
+```sh
+FERRY_PROFILE=alice pnpm tauri dev
+FERRY_PROFILE=bob   ./src-tauri/target/debug/ferry
+```
+
+In Alice's window copy your address (sidebar footer), create a group in Bob's
+window, and paste Alice's address into the member list. The invite lands on
+Alice's side once the group's steward commit finalizes.
+
+Environment variables:
+
+- `FERRY_PROFILE` — database/account profile name (default `default`).
+- `FERRY_REGISTRY_URL` — override the account + keypackage registry endpoint
+  (defaults to the devnet registry baked into libchat).
+
+Note: the underlying `logos_chat::open` currently mints a fresh dev account on
+every launch, so your address changes each time the app starts.
