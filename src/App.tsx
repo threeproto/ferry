@@ -61,8 +61,8 @@ function App() {
   const [copied, setCopied] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const activeIdRef = useRef<string | null>(null);
-  activeIdRef.current = activeId;
+  const myAddressRef = useRef<string | null>(null);
+  myAddressRef.current = engine.state === "ready" ? engine.address : null;
 
   const upsertGroup = useCallback((id: string, update?: (g: Group) => Group) => {
     setGroups((prev) => {
@@ -99,22 +99,37 @@ function App() {
   useEffect(() => {
     const unlisteners: Array<() => void> = [];
     let cancelled = false;
+    // In development, StrictMode unmounts and remounts this effect before the
+    // async listen() calls resolve; registering through `add` guarantees a
+    // listener set up after cleanup is torn down immediately instead of
+    // leaking (a leaked listener shows every message twice).
+    const add = (unlisten: () => void) => {
+      if (cancelled) unlisten();
+      else unlisteners.push(unlisten);
+    };
 
     (async () => {
-      unlisteners.push(
+      add(
         await listen<string>("chat-ready", (e) => {
           setEngine({ state: "ready", address: e.payload });
           void loadGroups();
         }),
+      );
+      add(
         await listen<string>("chat-error", (e) => {
           setEngine({ state: "failed", error: e.payload });
         }),
+      );
+      add(
         await listen<ChatEventPayload>("chat-event", (e) => {
           const ev = e.payload;
           if (ev.type === "conversationStarted") {
             upsertGroup(ev.convoId);
             void refreshMembers(ev.convoId);
           } else if (ev.type === "messageReceived") {
+            // Our own messages are rendered when sent; drop any echo of them
+            // (e.g. history replayed by the transport after a restart).
+            if (ev.sender.account && ev.sender.account === myAddressRef.current) return;
             upsertGroup(ev.convoId, (g) => ({
               ...g,
               messages: [
