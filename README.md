@@ -23,6 +23,30 @@ pnpm install
 pnpm tauri dev
 ```
 
+## Building a distributable
+
+`pnpm tauri dev` links `liblogosdelivery` by its absolute nix store path, which
+is fine locally but does not exist on anyone else's machine. For a bundle that
+runs elsewhere, build with `LOGOS_DELIVERY_RELOCATABLE=1`: the library keeps its
+relocatable `@rpath`/`$ORIGIN` name, and `build.rs` copies it (plus `librln`,
+which it loads beside itself) into `src-tauri/frameworks/` for Tauri to bundle
+into `Contents/Frameworks`.
+
+```sh
+export LOGOS_DELIVERY_LIB_DIR="$(nix build .#logos-delivery --no-link --print-out-paths -f ../libchat)/lib"
+export LOGOS_DELIVERY_RELOCATABLE=1
+pnpm tauri build
+```
+
+Both variables are required together — `tauri.conf.json` always bundles
+`frameworks/*.dylib`, so a `pnpm tauri build` without them fails on the missing
+files. To confirm a build is self-contained, check that nothing points into the
+store:
+
+```sh
+otool -L src-tauri/target/release/ferry | grep /nix/store   # expect no matches
+```
+
 ## Trying group chat locally
 
 Each profile keeps its own database and account. Run two instances with

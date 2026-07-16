@@ -48,6 +48,21 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
+      # Build the native liblogosdelivery up front and hand its location to the
+      # build scripts. RELOCATABLE=1 keeps the library's @rpath/$ORIGIN name
+      # intact so it can be bundled into the app; without it the binary would
+      # hardcode this runner's /nix/store path and fail to launch anywhere else.
+      - name: Build native logos-delivery library
+        shell: bash
+        run: |
+          set -euo pipefail
+          rev=$(grep -oE 'rev = "[0-9a-f]{40}"' src-tauri/Cargo.toml | head -1 | cut -d'"' -f2)
+          echo "libchat rev: $rev"
+          store=$(nix build "github:logos-messaging/libchat/$rev#logos-delivery" \
+            --no-link --print-out-paths)
+          echo "LOGOS_DELIVERY_LIB_DIR=$store/lib" >> "$GITHUB_ENV"
+          echo "LOGOS_DELIVERY_RELOCATABLE=1" >> "$GITHUB_ENV"
+
       - name: Setup protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -75,6 +90,34 @@ jobs:
 
       - name: Install frontend dependencies
         run: pnpm install
+
+      # Compile before bundling so the guard below can inspect the binary while
+      # a bad artifact can still be stopped. tauri-action reuses this build.
+      - name: Compile
+        working-directory: src-tauri
+        run: cargo build --release ${{ matrix.args }}
+
+      # Guard: a binary that still points into /nix/store links fine on the
+      # runner but dies on a user's machine, so fail loudly here instead of
+      # publishing a broken artifact.
+      - name: Verify no /nix/store leaks into the binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          target_dir="src-tauri/target/${{ matrix.target }}/release"
+          bin="$target_dir/ferry"
+          echo "Inspecting: $bin"
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            deps=$(otool -L "$bin")
+          else
+            deps=$(objdump -p "$bin" | grep NEEDED || true)
+          fi
+          echo "$deps"
+          if grep -q "/nix/store" <<<"$deps"; then
+            echo "::error::binary references /nix/store; it will not run on a machine without nix"
+            exit 1
+          fi
+          echo "OK: no /nix/store references"
 
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
