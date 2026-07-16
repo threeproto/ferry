@@ -14,12 +14,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS Intel
+          # macOS universal (Intel + Apple Silicon in one binary)
           - platform: macos-latest
-            args: --target x86_64-apple-darwin
-          # macOS Apple Silicon
-          - platform: macos-latest
-            args: --target aarch64-apple-darwin
+            args: --target universal-apple-darwin
           # Windows
           - platform: windows-latest
             args: ""
