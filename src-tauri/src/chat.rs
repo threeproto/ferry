@@ -8,9 +8,10 @@
 
 use std::sync::Mutex;
 use std::thread;
+use std::time::Duration;
 
 use crossbeam_channel::Receiver;
-use logos_chat::{ConversationClass, Event, LogosChatClient, LogosConfig};
+use logos_chat::{ConversationClass, Event, GroupV2Config, LogosChatClient, LogosConfig};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -131,8 +132,24 @@ fn open_client(app: &AppHandle) -> Result<(LogosChatClient, Receiver<Event>), St
     if let Ok(url) = std::env::var("FERRY_REGISTRY_URL") {
         config.set_registry_url(url);
     }
+    config.set_group_v2_config(responsive_group_config());
 
     logos_chat::open(config).map_err(|e| e.to_string())
+}
+
+/// Snappier GroupV2 timers than the de-mls defaults (which wait ~60s before an
+/// epoch steward commits a membership change). These trade a bit of batching
+/// for member adds that land in a few seconds — a better fit for an interactive
+/// desktop app where users watch invitees appear.
+fn responsive_group_config() -> GroupV2Config {
+    GroupV2Config {
+        commit_inactivity_duration: Duration::from_secs(3),
+        freeze_duration: Duration::from_millis(1500),
+        voting_delay: Duration::from_secs(1),
+        election_voting_delay: Duration::from_secs(1),
+        consensus_timeout: Duration::from_secs(5),
+        ..GroupV2Config::default()
+    }
 }
 
 /// Forward every client event to the webview until the client shuts down.

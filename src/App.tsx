@@ -340,7 +340,7 @@ function App() {
             <h2 className="text-lg font-medium">End-to-end encrypted group chat</h2>
             <p className="max-w-md text-sm text-muted-foreground">
               Create a group with your friends' account addresses, or wait for an invite to arrive. Group
-              invites are committed asynchronously and can take a minute to land.
+              invites are committed asynchronously and take a few seconds to land.
             </p>
             <Button disabled={engine.state !== "ready"} onClick={() => setShowNewGroup(true)}>
               <Plus data-icon="inline-start" />
@@ -456,8 +456,8 @@ function App() {
               className="mb-2 w-full resize-none rounded-lg border bg-input/30 p-3 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
             />
             <p className="mb-4 text-xs text-muted-foreground">
-              Invites are staged as proposals and committed asynchronously — members can take around a
-              minute to appear.
+              Invites are staged as proposals and committed asynchronously — members take a few seconds
+              to appear.
             </p>
             <div className="flex justify-end gap-2">
               <Button

@@ -5,8 +5,10 @@ End-to-end encrypted group chat desktop app (Tauri + React), built on
 delegate identity, the HTTP keypackage + account registry, encrypted SQLite
 storage, and an embedded logos-delivery (Waku) node as the transport. Groups
 are GroupV2 conversations (de-mls): invites and member adds are staged as
-proposals and committed asynchronously, so they can take around a minute to
-land on the other side.
+proposals and committed asynchronously by an epoch steward. Ferry tunes the
+GroupV2 timers down from the de-mls defaults (which wait ~60s before
+committing) so invitees appear within a few seconds; messaging inside an
+established group is near-instant since it needs no consensus round.
 
 ## Build and run
 
@@ -31,7 +33,8 @@ FERRY_PROFILE=bob   ./src-tauri/target/debug/ferry
 
 In Alice's window copy your address (sidebar footer), create a group in Bob's
 window, and paste Alice's address into the member list. The invite lands on
-Alice's side once the group's steward commit finalizes.
+Alice's side once the group's steward commit finalizes (a few seconds with
+Ferry's tuned timers).
 
 Environment variables:
 
