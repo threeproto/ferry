@@ -1658,6 +1658,7 @@ dependencies = [
 [[package]]
 name = "chat-sqlite"
 version = "0.1.0"
+source = "git+https://github.com/logos-messaging/libchat?rev=2e3eab3b0b97b5d85139466b26bcc1c372c4b212#2e3eab3b0b97b5d85139466b26bcc1c372c4b212"
 dependencies = [
  "crypto",
  "hex",
@@ -1711,6 +1712,7 @@ dependencies = [
 [[package]]
 name = "components"
 version = "0.1.0"
+source = "git+https://github.com/logos-messaging/libchat?rev=2e3eab3b0b97b5d85139466b26bcc1c372c4b212#2e3eab3b0b97b5d85139466b26bcc1c372c4b212"
 dependencies = [
  "base64 0.22.1",
  "crossbeam-channel",
@@ -1935,6 +1937,7 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 [[package]]
 name = "crypto"
 version = "0.1.0"
+source = "git+https://github.com/logos-messaging/libchat?rev=2e3eab3b0b97b5d85139466b26bcc1c372c4b212#2e3eab3b0b97b5d85139466b26bcc1c372c4b212"
 dependencies = [
  "ed25519-dalek",
  "generic-array 1.4.4",
@@ -2324,6 +2327,7 @@ dependencies = [
 [[package]]
 name = "double-ratchets"
 version = "0.0.1"
+source = "git+https://github.com/logos-messaging/libchat?rev=2e3eab3b0b97b5d85139466b26bcc1c372c4b212#2e3eab3b0b97b5d85139466b26bcc1c372c4b212"
 dependencies = [
  "blake2",
  "chacha20poly1305",
@@ -2494,6 +2498,7 @@ checksum = "4ef6b89e5b37196644d8796de5268852ff179b44e96276cf4290264843743bb7"
 [[package]]
 name = "embedded-logos-delivery"
 version = "0.1.0"
+source = "git+https://github.com/logos-messaging/libchat?rev=2e3eab3b0b97b5d85139466b26bcc1c372c4b212#2e3eab3b0b97b5d85139466b26bcc1c372c4b212"
 dependencies = [
  "base64 0.22.1",
  "crossbeam-channel",
@@ -4078,6 +4083,7 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 [[package]]
 name = "libchat"
 version = "0.1.0"
+source = "git+https://github.com/logos-messaging/libchat?rev=2e3eab3b0b97b5d85139466b26bcc1c372c4b212#2e3eab3b0b97b5d85139466b26bcc1c372c4b212"
 dependencies = [
  "alloy",
  "base64 0.22.1",
@@ -4442,6 +4448,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 [[package]]
 name = "logos-account"
 version = "0.1.0"
+source = "git+https://github.com/logos-messaging/libchat?rev=2e3eab3b0b97b5d85139466b26bcc1c372c4b212#2e3eab3b0b97b5d85139466b26bcc1c372c4b212"
 dependencies = [
  "crypto",
  "hex",
@@ -4452,6 +4459,7 @@ dependencies = [
 [[package]]
 name = "logos-chat"
 version = "0.1.0"
+source = "git+https://github.com/logos-messaging/libchat?rev=2e3eab3b0b97b5d85139466b26bcc1c372c4b212#2e3eab3b0b97b5d85139466b26bcc1c372c4b212"
 dependencies = [
  "components",
  "crossbeam-channel",
@@ -4464,6 +4472,7 @@ dependencies = [
 [[package]]
 name = "logos-delivery"
 version = "0.1.0"
+source = "git+https://github.com/logos-messaging/libchat?rev=2e3eab3b0b97b5d85139466b26bcc1c372c4b212#2e3eab3b0b97b5d85139466b26bcc1c372c4b212"
 dependencies = [
  "base64 0.22.1",
  "crossbeam-channel",
@@ -4478,6 +4487,7 @@ dependencies = [
 [[package]]
 name = "logos-generic-chat"
 version = "0.1.0"
+source = "git+https://github.com/logos-messaging/libchat?rev=2e3eab3b0b97b5d85139466b26bcc1c372c4b212#2e3eab3b0b97b5d85139466b26bcc1c372c4b212"
 dependencies = [
  "chat-sqlite",
  "components",
@@ -6805,6 +6815,7 @@ dependencies = [
 [[package]]
 name = "shared-traits"
 version = "0.1.0"
+source = "git+https://github.com/logos-messaging/libchat?rev=2e3eab3b0b97b5d85139466b26bcc1c372c4b212#2e3eab3b0b97b5d85139466b26bcc1c372c4b212"
 dependencies = [
  "crypto",
 ]
@@ -6961,6 +6972,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 [[package]]
 name = "storage"
 version = "0.1.0"
+source = "git+https://github.com/logos-messaging/libchat?rev=2e3eab3b0b97b5d85139466b26bcc1c372c4b212#2e3eab3b0b97b5d85139466b26bcc1c372c4b212"
 dependencies = [
  "crypto",
  "thiserror 2.0.18",
