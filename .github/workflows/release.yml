@@ -14,18 +14,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS Intel
-          - platform: macos-latest
+          # macOS Intel — native x86_64 runner (nix builds the x86_64 lib)
+          - platform: macos-13
+            target: x86_64-apple-darwin
             args: --target x86_64-apple-darwin
-          # macOS Apple Silicon
-          - platform: macos-latest
+          # macOS Apple Silicon — native arm64 runner (nix builds the arm64 lib)
+          - platform: macos-14
+            target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin
-          # Windows
-          - platform: windows-latest
-            args: ""
           # Linux
           - platform: ubuntu-22.04
+            target: ""
             args: ""
+    # NOTE: Windows is intentionally omitted — the logos-delivery transport
+    # (native liblogosdelivery) supports only macOS and Linux; its build script
+    # panics on any other OS.
 
     runs-on: ${{ matrix.platform }}
 
@@ -39,10 +42,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
+      # The logos-delivery build script builds the native liblogosdelivery via
+      # `nix build .#logos-delivery` in the libchat flake, so Nix (with flakes)
+      # must be on PATH during the Rust build.
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Setup protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.target }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -55,9 +69,9 @@ jobs:
           node-version: "lts/*"
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v3
+        uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 11
 
       - name: Install frontend dependencies
         run: pnpm install
