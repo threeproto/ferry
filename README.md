@@ -10,6 +10,8 @@ GroupV2 timers down from the de-mls defaults (which wait ~60s before
 committing) so invitees appear within a few seconds; messaging inside an
 established group is near-instant since it needs no consensus round.
 
+![ferry-app](./docs/ferry-app.png)
+
 ## Build and run
 
 The `logos-delivery` crate links the native `liblogosdelivery`. Its build
