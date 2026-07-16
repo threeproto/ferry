@@ -24,6 +24,7 @@ pub enum ChatManager {
         address: String,
     },
     Failed(String),
+    ShutDown,
 }
 
 pub struct ChatState(pub Mutex<ChatManager>);
@@ -71,7 +72,16 @@ enum ChatEvent {
 /// `chat-ready` / `chat-error` events, then keep pumping chat events.
 pub fn init(app: AppHandle) {
     thread::spawn(move || {
-        match open_client(&app) {
+        let opened = open_client(&app);
+        // The embedded node's runtime installs its own SIGINT/SIGTERM handlers
+        // while starting, which would swallow Ctrl+C. Install ours after it so
+        // they win, and route termination through Tauri's regular exit path
+        // (which runs [`shutdown`]).
+        let exit_handle = app.clone();
+        if let Err(e) = ctrlc::set_handler(move || exit_handle.exit(0)) {
+            eprintln!("could not install termination handler: {e}");
+        }
+        match opened {
             Ok((client, events)) => {
                 let address = client.addr().to_string();
                 *app.state::<ChatState>().0.lock().unwrap() = ChatManager::Ready {
@@ -87,6 +97,22 @@ pub fn init(app: AppHandle) {
             }
         };
     });
+}
+
+/// Dispose the chat client on app exit: joins the client's worker thread and
+/// stops the embedded node via drop. A watchdog force-quits in case the native
+/// node's stop hangs, so the process can never wedge on the way out.
+pub fn shutdown(app: &AppHandle) {
+    thread::spawn(|| {
+        thread::sleep(std::time::Duration::from_secs(5));
+        eprintln!("shutdown watchdog fired — forcing exit");
+        std::process::exit(0);
+    });
+    let manager = std::mem::replace(
+        &mut *app.state::<ChatState>().0.lock().unwrap(),
+        ChatManager::ShutDown,
+    );
+    drop(manager);
 }
 
 fn open_client(app: &AppHandle) -> Result<(LogosChatClient, Receiver<Event>), String> {
@@ -148,6 +174,7 @@ fn with_client<T>(
         ChatManager::Ready { client, .. } => f(client),
         ChatManager::Starting => Err("chat engine is still starting".into()),
         ChatManager::Failed(e) => Err(format!("chat engine failed to start: {e}")),
+        ChatManager::ShutDown => Err("chat engine is shut down".into()),
     }
 }
 
@@ -168,6 +195,11 @@ pub fn chat_status(state: tauri::State<ChatState>) -> ChatStatus {
             state: "failed",
             address: None,
             error: Some(e.clone()),
+        },
+        ChatManager::ShutDown => ChatStatus {
+            state: "stopped",
+            address: None,
+            error: None,
         },
     }
 }
