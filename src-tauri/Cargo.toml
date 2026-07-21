@@ -24,4 +24,4 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 crossbeam-channel = "0.5"
 ctrlc = { version = "3", features = ["termination"] }
-logos-chat = { git = "https://github.com/logos-messaging/libchat", rev = "3c3ea06f766453c290486cb17ac092646881aa4d" }
+logos-chat = { git = "https://github.com/logos-messaging/libchat", rev = "e60bdfeb5c520b651c7f3d0ff65acf9af0d186ff" }

@@ -12,6 +12,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             chat::chat_status,
             chat::create_group,
+            chat::group_metadata,
             chat::add_members,
             chat::send_group_message,
             chat::list_groups,
