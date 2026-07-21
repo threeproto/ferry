@@ -1,6 +1,6 @@
 [package]
 name = "ferry"
-version = "0.1.0"
+version = "0.1.6"
 description = "Ferry chat"
 authors = ["Kaichao"]
 edition = "2021"
@@ -24,4 +24,4 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 crossbeam-channel = "0.5"
 ctrlc = { version = "3", features = ["termination"] }
-logos-chat = { git = "https://github.com/logos-messaging/libchat", rev = "2e3eab3b0b97b5d85139466b26bcc1c372c4b212" }
+logos-chat = { git = "https://github.com/logos-messaging/libchat", rev = "e60bdfeb5c520b651c7f3d0ff65acf9af0d186ff" }

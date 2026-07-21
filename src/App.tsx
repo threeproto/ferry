@@ -14,6 +14,8 @@ type ChatEventPayload =
 
 type ChatStatus = { state: "starting" | "ready" | "failed"; address: string | null; error: string | null };
 
+type GroupInfo = { name: string; description: string };
+
 type Message = {
   id: number;
   content: string;
@@ -24,6 +26,8 @@ type Message = {
 
 type Group = {
   id: string;
+  name: string;
+  description: string;
   messages: Message[];
   members: Member[];
 };
@@ -57,6 +61,8 @@ function App() {
   const [showAddMembers, setShowAddMembers] = useState(false);
   const [draft, setDraft] = useState("");
   const [addressesDraft, setAddressesDraft] = useState("");
+  const [nameDraft, setNameDraft] = useState("");
+  const [descriptionDraft, setDescriptionDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -66,7 +72,7 @@ function App() {
 
   const upsertGroup = useCallback((id: string, update?: (g: Group) => Group) => {
     setGroups((prev) => {
-      const existing = prev[id] ?? { id, messages: [], members: [] };
+      const existing = prev[id] ?? { id, name: "", description: "", messages: [], members: [] };
       return { ...prev, [id]: update ? update(existing) : existing };
     });
     setOrder((prev) => (prev.includes(id) ? prev : [...prev, id]));
@@ -84,17 +90,30 @@ function App() {
     [upsertGroup],
   );
 
+  const refreshMeta = useCallback(
+    async (convoId: string) => {
+      try {
+        const meta = await invoke<GroupInfo>("group_metadata", { convoId });
+        upsertGroup(convoId, (g) => ({ ...g, name: meta.name, description: meta.description }));
+      } catch {
+        // legacy groups carry no metadata and direct convos have none; keep the id fallback
+      }
+    },
+    [upsertGroup],
+  );
+
   const loadGroups = useCallback(async () => {
     try {
       const ids = await invoke<string[]>("list_groups");
       for (const id of ids) {
         upsertGroup(id);
         void refreshMembers(id);
+        void refreshMeta(id);
       }
     } catch {
       // engine not ready yet; conversations arrive via events instead
     }
-  }, [upsertGroup, refreshMembers]);
+  }, [upsertGroup, refreshMembers, refreshMeta]);
 
   useEffect(() => {
     const unlisteners: Array<() => void> = [];
@@ -126,6 +145,7 @@ function App() {
           if (ev.type === "conversationStarted") {
             upsertGroup(ev.convoId);
             void refreshMembers(ev.convoId);
+            void refreshMeta(ev.convoId);
           } else if (ev.type === "messageReceived") {
             // Our own messages are rendered when sent; drop any echo of them
             // (e.g. history replayed by the transport after a restart).
@@ -164,7 +184,7 @@ function App() {
       cancelled = true;
       unlisteners.forEach((fn) => fn());
     };
-  }, [loadGroups, refreshMembers, upsertGroup]);
+  }, [loadGroups, refreshMembers, refreshMeta, upsertGroup]);
 
   // Keep the active group's roster fresh: adds commit asynchronously.
   useEffect(() => {
@@ -187,11 +207,15 @@ function App() {
     setBanner(null);
     try {
       const members = parseAddresses(addressesDraft);
-      const id = await invoke<string>("create_group", { members });
-      upsertGroup(id);
+      const name = nameDraft.trim();
+      const description = descriptionDraft.trim();
+      const id = await invoke<string>("create_group", { members, name, description });
+      upsertGroup(id, (g) => ({ ...g, name, description }));
       setActiveId(id);
       setShowNewGroup(false);
       setAddressesDraft("");
+      setNameDraft("");
+      setDescriptionDraft("");
       void refreshMembers(id);
     } catch (e) {
       setBanner(String(e));
@@ -262,6 +286,8 @@ function App() {
             disabled={engine.state !== "ready"}
             onClick={() => {
               setAddressesDraft("");
+              setNameDraft("");
+              setDescriptionDraft("");
               setShowNewGroup(true);
             }}
           >
@@ -287,7 +313,7 @@ function App() {
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-medium">Group {short(id)}</span>
+                  <span className="truncate text-sm font-medium">{g.name || `Group ${short(id)}`}</span>
                   <span className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Users className="size-3" />
                     {g.members.length || "…"}
@@ -342,7 +368,15 @@ function App() {
               Create a group with your friends' account addresses, or wait for an invite to arrive. Group
               invites are committed asynchronously and take a few seconds to land.
             </p>
-            <Button disabled={engine.state !== "ready"} onClick={() => setShowNewGroup(true)}>
+            <Button
+              disabled={engine.state !== "ready"}
+              onClick={() => {
+                setAddressesDraft("");
+                setNameDraft("");
+                setDescriptionDraft("");
+                setShowNewGroup(true);
+              }}
+            >
               <Plus data-icon="inline-start" />
               New group
             </Button>
@@ -351,7 +385,12 @@ function App() {
           <>
             <header className="flex items-center gap-2 border-b px-4 py-3">
               <div className="min-w-0 flex-1">
-                <h2 className="truncate text-sm font-semibold">Group {short(active.id)}</h2>
+                <h2 className="truncate text-sm font-semibold">
+                  {active.name || `Group ${short(active.id)}`}
+                </h2>
+                {active.description && (
+                  <p className="truncate text-xs text-muted-foreground">{active.description}</p>
+                )}
                 <p className="truncate text-xs text-muted-foreground">
                   {active.members.length > 0
                     ? active.members.map(memberLabel).join(", ")
@@ -443,6 +482,22 @@ function App() {
                 <X />
               </Button>
             </div>
+            {showNewGroup && (
+              <>
+                <input
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  placeholder="Group name (optional)"
+                  className="mb-2 w-full rounded-lg border bg-input/30 p-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                />
+                <input
+                  value={descriptionDraft}
+                  onChange={(e) => setDescriptionDraft(e.target.value)}
+                  placeholder="Description (optional)"
+                  className="mb-2 w-full rounded-lg border bg-input/30 p-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                />
+              </>
+            )}
             <p className="mb-2 text-sm text-muted-foreground">
               Paste account addresses (one per line or comma separated).
               {showNewGroup && " Leave empty to start a group with just yourself."}

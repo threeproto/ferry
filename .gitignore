@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Native libs staged into the bundle by build.rs (see LOGOS_DELIVERY_RELOCATABLE)
+src-tauri/frameworks/

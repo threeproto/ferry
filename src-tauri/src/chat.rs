@@ -11,7 +11,9 @@ use std::thread;
 use std::time::Duration;
 
 use crossbeam_channel::Receiver;
-use logos_chat::{ConversationClass, Event, GroupV2Config, LogosChatClient, LogosConfig};
+use logos_chat::{
+    ConversationClass, Event, GroupMetadata, GroupV2Config, LogosChatClient, LogosConfig,
+};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -222,11 +224,41 @@ pub fn chat_status(state: tauri::State<ChatState>) -> ChatStatus {
 }
 
 #[tauri::command]
-pub fn create_group(state: tauri::State<ChatState>, members: Vec<String>) -> Result<String, String> {
+pub fn create_group(
+    state: tauri::State<ChatState>,
+    members: Vec<String>,
+    name: String,
+    description: String,
+) -> Result<String, String> {
     with_client(&state, |client| {
         let refs: Vec<&str> = members.iter().map(String::as_str).collect();
         client
-            .create_group_conversation(&refs)
+            .create_group_conversation(&refs, GroupMetadata::new(name, description))
+            .map_err(|e| e.to_string())
+    })
+}
+
+/// A group's shared name and description, as set at creation and carried to
+/// joiners in the welcome. Either field may be empty.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupInfo {
+    pub name: String,
+    pub description: String,
+}
+
+#[tauri::command]
+pub fn group_metadata(
+    state: tauri::State<ChatState>,
+    convo_id: String,
+) -> Result<GroupInfo, String> {
+    with_client(&state, |client| {
+        client
+            .group_metadata(&convo_id)
+            .map(|m| GroupInfo {
+                name: m.name,
+                description: m.desc,
+            })
             .map_err(|e| e.to_string())
     })
 }

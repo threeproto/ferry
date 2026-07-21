@@ -14,12 +14,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS Intel — native x86_64 runner (nix builds the x86_64 lib)
-          - platform: macos-13
-            target: x86_64-apple-darwin
-            args: --target x86_64-apple-darwin
-          # macOS Apple Silicon — native arm64 runner (nix builds the arm64 lib)
-          - platform: macos-14
+          # macOS Apple Silicon — native arm64 runner (nix builds the arm64 lib).
+          # Intel (x86_64) is intentionally dropped: Apple discontinued x86_64,
+          # every Mac since ~2020 is Apple Silicon, and GitHub retired the last
+          # free Intel runner (macos-13) in Dec 2025. arm64-only means no Rosetta
+          # coverage for 2019-2020 Intel Macs, which we accept.
+          - platform: macos-15
             target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin
           # Linux
@@ -47,6 +47,21 @@ jobs:
       # must be on PATH during the Rust build.
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+
+      # Build the native liblogosdelivery up front and hand its location to the
+      # build scripts. RELOCATABLE=1 keeps the library's @rpath/$ORIGIN name
+      # intact so it can be bundled into the app; without it the binary would
+      # hardcode this runner's /nix/store path and fail to launch anywhere else.
+      - name: Build native logos-delivery library
+        shell: bash
+        run: |
+          set -euo pipefail
+          rev=$(grep -oE 'rev = "[0-9a-f]{40}"' src-tauri/Cargo.toml | head -1 | cut -d'"' -f2)
+          echo "libchat rev: $rev"
+          store=$(nix build "github:logos-messaging/libchat/$rev#logos-delivery" \
+            --no-link --print-out-paths)
+          echo "LOGOS_DELIVERY_LIB_DIR=$store/lib" >> "$GITHUB_ENV"
+          echo "LOGOS_DELIVERY_RELOCATABLE=1" >> "$GITHUB_ENV"
 
       - name: Setup protoc
         uses: arduino/setup-protoc@v3
@@ -76,10 +91,47 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      # Compile before bundling so the guard below can inspect the binary while
+      # a bad artifact can still be stopped. tauri-action reuses this build.
+      - name: Compile
+        working-directory: src-tauri
+        run: cargo build --release ${{ matrix.args }}
+
+      # Guard: a binary that still points into /nix/store links fine on the
+      # runner but dies on a user's machine, so fail loudly here instead of
+      # publishing a broken artifact.
+      - name: Verify no /nix/store leaks into the binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          target_dir="src-tauri/target/${{ matrix.target }}/release"
+          bin="$target_dir/ferry"
+          echo "Inspecting: $bin"
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            deps=$(otool -L "$bin")
+          else
+            deps=$(objdump -p "$bin" | grep NEEDED || true)
+          fi
+          echo "$deps"
+          if grep -q "/nix/store" <<<"$deps"; then
+            echo "::error::binary references /nix/store; it will not run on a machine without nix"
+            exit 1
+          fi
+          echo "OK: no /nix/store references"
+
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The AppImage bundler (linuxdeploy) discovers the binary's shared-lib
+          # dependencies via LD_LIBRARY_PATH, then copies them into the AppImage
+          # and rewrites the rpath. liblogosdelivery.so and librln.so live only
+          # in the nix store, so without this linuxdeploy can't resolve them and
+          # fails with the opaque "failed to run linuxdeploy". Linux only; macOS
+          # bundles the dylibs through tauri.conf.json's `frameworks`.
+          LD_LIBRARY_PATH: ${{ matrix.platform == 'ubuntu-22.04' && env.LOGOS_DELIVERY_LIB_DIR || '' }}
+          # Don't let linuxdeploy strip the prebuilt nix libraries.
+          NO_STRIP: ${{ matrix.platform == 'ubuntu-22.04' && 'true' || '' }}
         with:
           tagName: v__VERSION__
           releaseName: "Ferry v__VERSION__"
